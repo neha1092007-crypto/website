@@ -1,0 +1,278 @@
+"use client"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { Download, FileText, Plus, RotateCcw, Sparkles, Trash2, Upload, X, CheckCircle2, XCircle } from "lucide-react"
+
+/* ================= Types ================= */
+type Job = { id: string; title: string; company: string; start: string; end: string; bullets: string[] }
+type Edu = { id: string; school: string; degree: string; year: string }
+type Proj = { id: string; name: string; description: string; bullets: string[] }
+type Resume = {
+  personal: { name: string; email: string; phone: string; location: string; linkedin: string }
+  summary: string; experience: Job[]; education: Edu[]; projects: Proj[]; skills: string[]; certifications: string[]
+}
+type Check = { id: string; label: string; passed: boolean; weight: number; fix: string }
+
+const uid = () => Math.random().toString(36).slice(2, 9)
+const EMPTY: Resume = { personal: { name: "", email: "", phone: "", location: "", linkedin: "" }, summary: "", experience: [], education: [], projects: [], skills: [], certifications: [] }
+const DEMO: Resume = {
+  personal: { name: "Priya Sharma", email: "priya.sharma@email.com", phone: "+91 98765 43210", location: "Hyderabad, India", linkedin: "linkedin.com/in/priyasharma" },
+  summary: "Final-year B.Tech Data Science student with hands-on experience in Python, SQL and data visualization. Completed a data analyst internship and two analytics projects, and enjoy turning messy data into clear insights for business teams.",
+  experience: [{ id: "e1", title: "Data Analyst Intern", company: "TechNova Solutions", start: "Jun 2025", end: "Aug 2025", bullets: ["Cleaned and analyzed a 50,000-row sales dataset using Pandas, reducing reporting errors by 18%.", "Built weekly Excel dashboards used by a team of 6 managers."] }],
+  education: [{ id: "d1", school: "JNTU Hyderabad", degree: "B.Tech in Data Science", year: "2026" }],
+  projects: [{ id: "p1", name: "Customer Churn Prediction", description: "Predicted customer churn from usage data.", bullets: ["Built a logistic regression model in Python with 82% accuracy.", "Visualized key drivers with Matplotlib."] }],
+  skills: ["Python", "SQL", "Excel", "Pandas", "NumPy", "Matplotlib", "Statistics", "Git", "Data Analysis", "Communication"],
+  certifications: [],
+}
+const DEMO_JD = `Junior Data Analyst
+We need a Junior Data Analyst to turn data into insights.
+Requirements: SQL, Python and Excel. Experience with Tableau or Power BI for dashboards and data visualization.
+Knowledge of statistics and A/B testing. 1+ years of experience (internships count). Bachelor's degree.
+Preferred: Looker, Google Analytics, ETL pipelines, data analytics certification.`
+
+/* ================= ATS engine ================= */
+const VERBS = new Set("built developed designed created led managed analyzed improved increased reduced implemented launched delivered optimized automated cleaned wrote presented organized coordinated supported researched tested deployed trained streamlined collaborated visualized predicted maintained resolved achieved generated established evaluated".split(" "))
+const STOP = new Set("the and for with you your are our will have has this that from they their who what about into over more such than also can able work working team role job like not all any new one use using including other must should may etc strong good years year experience skills skill knowledge ability required requirements preferred looking join help make based related field degree plus familiarity need turn".split(" "))
+const wc = (t: string) => (t.trim() ? t.trim().split(/\s+/).length : 0)
+const rx = (t: string) => t.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
+const hasTerm = (text: string, term: string) => new RegExp("(^|[^a-z0-9])" + rx(term.toLowerCase()) + "($|[^a-z0-9])").test(text.toLowerCase())
+const toText = (r: Resume) => [...Object.values(r.personal), r.summary, ...r.experience.flatMap(j => [j.title, j.company, ...j.bullets]), ...r.education.flatMap(e => [e.school, e.degree, e.year]), ...r.projects.flatMap(p => [p.name, p.description, ...p.bullets]), r.skills.join(", "), r.certifications.join(", ")].filter(Boolean).join("\n")
+function keywordsOf(jd: string, n = 25) {
+  const f: Record<string, number> = {}
+  ;(jd.toLowerCase().match(/[a-z][a-z+#./-]{1,}/g) || []).forEach(w => { const k = w.replace(/[./-]+$/, ""); if (k.length > 2 && !STOP.has(k)) f[k] = (f[k] || 0) + 1 })
+  return Object.entries(f).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length).slice(0, n).map(e => e[0])
+}
+function analyze(r: Resume, jd: string) {
+  const text = toText(r)
+  const bullets = [...r.experience.flatMap(j => j.bullets), ...r.projects.flatMap(p => p.bullets)].filter(b => b.trim())
+  const w = wc(text), checks: Check[] = []
+  const add = (id: string, label: string, passed: boolean, weight: number, fix: string) => checks.push({ id, label, passed, weight, fix })
+  add("contact", "Contact information", /\S+@\S+\.\S+/.test(r.personal.email) && r.personal.phone.replace(/\D/g, "").length >= 8, 12, "Add a professional email and a phone number.")
+  add("name", "Name and location", !!r.personal.name.trim() && !!r.personal.location.trim(), 4, "Add your full name and city.")
+  const sw = wc(r.summary)
+  add("summary", "Summary of 30-90 words", sw >= 30 && sw <= 90, 8, sw < 30 ? "Write a 2-3 sentence summary of your real background." : "Shorten your summary to under 90 words.")
+  add("exp", "Experience or projects listed", r.experience.length + r.projects.length > 0, 14, "Add internships, jobs or projects you have actually done.")
+  add("edu", "Education section", r.education.length > 0, 6, "Add your degree and school.")
+  add("skills", "Skills section (6+ skills)", r.skills.length >= 6, 10, "List at least 6 skills you genuinely have.")
+  const verbOk = bullets.length > 0 && bullets.filter(b => VERBS.has(b.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, ""))).length / bullets.length >= 0.6
+  add("verbs", "Bullets start with action verbs", verbOk, 10, 'Start bullets with verbs like "Built", "Analyzed", "Led".')
+  add("metrics", "Measurable achievements", bullets.filter(b => /\d/.test(b)).length >= 2, 12, "Where true, add numbers: sizes, percentages, time saved, team size.")
+  add("blen", "Concise bullets (under 30 words)", bullets.length > 0 && bullets.every(b => wc(b) <= 30), 6, "Split long bullets into shorter ones.")
+  add("len", "Length of 250-800 words", w >= 250 && w <= 800, 8, w < 250 ? "Add detail about real projects and responsibilities." : "Trim to one or two pages.")
+  let kw: { matched: string[]; missing: string[]; percent: number } | null = null
+  if (jd.trim().length > 40) {
+    const ks = keywordsOf(jd), matched = ks.filter(k => hasTerm(text, k)), missing = ks.filter(k => !hasTerm(text, k))
+    kw = { matched, missing, percent: ks.length ? Math.round((100 * matched.length) / ks.length) : 0 }
+    add("kw", "Keyword match with job (50%+)", kw.percent >= 50, 16, "Use the job's wording for skills you genuinely have.")
+  }
+  const total = checks.reduce((s, c) => s + c.weight, 0)
+  const score = Math.round((100 * checks.filter(c => c.passed).reduce((s, c) => s + c.weight, 0)) / total)
+  const tips = checks.filter(c => !c.passed).sort((a, b) => b.weight - a.weight).map(c => ({ p: c.weight >= 12 ? "High" : c.weight >= 8 ? "Medium" : "Low", t: c.fix }))
+  if (kw?.missing.length) tips.push({ p: "Medium", t: `Job keywords not found: ${kw.missing.slice(0, 6).join(", ")}. Add them only if they honestly describe your experience.` })
+  return { score, verdict: score >= 80 ? "Excellent" : score >= 60 ? "Good" : "Needs work", checks, kw, tips }
+}
+
+/* ================= Small UI pieces ================= */
+const inp = "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+const Card = ({ title, children }: { title: string; children: ReactNode }) => (
+  <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><h3 className="mb-3 text-sm font-semibold text-slate-800">{title}</h3>{children}</section>
+)
+function Tags({ items, onChange, ph }: { items: string[]; onChange: (v: string[]) => void; ph: string }) {
+  const [v, setV] = useState("")
+  const add = () => { const t = v.trim(); if (t && !items.some(i => i.toLowerCase() === t.toLowerCase())) onChange([...items, t]); setV("") }
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {items.map(i => (<button key={i} onClick={() => onChange(items.filter(x => x !== i))} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100" aria-label={`Remove ${i}`}>{i}<X size={12} /></button>))}
+      </div>
+      <div className="flex gap-2"><input className={inp} value={v} placeholder={ph} onChange={e => setV(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add() } }} /><button onClick={add} className="rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white hover:bg-indigo-700">Add</button></div>
+    </div>
+  )
+}
+function Bullets({ items, onChange }: { items: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="space-y-2">
+      {items.map((b, i) => (
+        <div key={i} className="flex gap-2"><textarea rows={2} className={inp} value={b} placeholder="Start with an action verb, add a real number if you have one" onChange={e => onChange(items.map((x, j) => (j === i ? e.target.value : x)))} /><button aria-label="Remove bullet" onClick={() => onChange(items.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-600"><Trash2 size={16} /></button></div>
+      ))}
+      <button onClick={() => onChange([...items, ""])} className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600"><Plus size={14} />Add bullet</button>
+    </div>
+  )
+}
+function Ring({ value }: { value: number }) {
+  const c = 2 * Math.PI * 52
+  return (
+    <div className="relative mx-auto h-36 w-36" role="img" aria-label={`ATS score ${value} out of 100`}>
+      <svg viewBox="0 0 120 120" className="-rotate-90"><circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" strokeWidth="10" /><circle cx="60" cy="60" r="52" fill="none" stroke={value >= 80 ? "#059669" : value >= 60 ? "#4f46e5" : "#d97706"} strokeWidth="10" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - value / 100)} style={{ transition: "stroke-dashoffset .8s ease" }} /></svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center"><span className="text-4xl font-extrabold text-slate-900">{value}</span><span className="text-xs text-slate-500">ATS score</span></div>
+    </div>
+  )
+}
+
+/* ================= Page ================= */
+export default function Page() {
+  const [r, setR] = useState<Resume>(EMPTY)
+  const [jd, setJd] = useState("")
+  const [jt, setJt] = useState("")
+  const [tpl, setTpl] = useState<"classic" | "modern" | "compact">("classic")
+  const [view, setView] = useState<"edit" | "preview" | "ats">("edit")
+  const [imp, setImp] = useState(false)
+  const [impText, setImpText] = useState("")
+  const [msg, setMsg] = useState("")
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => { try { const s = localStorage.getItem("rf"); if (s) { const d = JSON.parse(s); if (d.r) setR(d.r); if (d.jd) setJd(d.jd) } } catch {} setReady(true) }, [])
+  useEffect(() => { if (!ready) return; try { localStorage.setItem("rf", JSON.stringify({ r, jd })) } catch {} }, [r, jd, ready])
+  const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(""), 2500) }
+  const up = (fn: (n: Resume) => void) => setR(p => { const n = structuredClone(p); fn(n); return n })
+  const res = useMemo(() => analyze(r, jd + (jt ? "\n" + jt : "")), [r, jd, jt])
+
+  const importText = () => {
+    const t = impText.trim(); if (t.length < 30) return flash("Paste more resume text first.")
+    const lines = t.split("\n").map(l => l.trim()).filter(Boolean)
+    const sec = (name: RegExp) => { const i = lines.findIndex(l => name.test(l) && l.length < 30); if (i < 0) return ""; const out: string[] = []; for (let k = i + 1; k < lines.length && !/^(summary|objective|profile|education|experience|skills|projects?|certifications?)\b/i.test(lines[k]); k++) out.push(lines[k]); return out.join(" ") }
+    up(n => {
+      n.personal.name = n.personal.name || lines[0].slice(0, 60)
+      n.personal.email = n.personal.email || (t.match(/[\w.+-]+@[\w-]+\.[\w.]+/) || [""])[0]
+      n.personal.phone = n.personal.phone || (t.match(/\+?\d[\d\s().-]{8,}\d/) || [""])[0]
+      n.summary = n.summary || sec(/^(summary|objective|profile)/i)
+      const sk = sec(/^skills/i); if (sk) n.skills = Array.from(new Set([...n.skills, ...sk.split(/[,|•;]/).map(s => s.trim()).filter(s => s && s.length < 30)]))
+    })
+    setImp(false); setImpText(""); flash("Imported what could be detected. Please review each section.")
+  }
+
+  const T = { classic: "font-serif", modern: "font-sans", compact: "font-sans text-[11px] leading-snug" }[tpl]
+  const H = ({ children }: { children: ReactNode }) => <h2 className={`mt-4 mb-1 border-b pb-0.5 text-xs font-bold uppercase tracking-wide ${tpl === "modern" ? "border-indigo-500 text-indigo-700" : "border-slate-400 text-slate-800"}`}>{children}</h2>
+  const show = (v: string) => `${view === v ? "block" : "hidden"} lg:block`
+
+  return (
+    <main className="min-h-screen bg-slate-50 text-slate-900">
+      <style>{`@media print{body *{visibility:hidden}#resume,#resume *{visibility:visible}#resume{position:absolute;left:0;top:0;width:100%;box-shadow:none!important;border:0!important}}`}</style>
+      <header className="no-print sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <div className="flex items-center gap-2 font-extrabold"><FileText className="text-indigo-600" size={22} />ResumeForge</div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => { setR(DEMO); setJd(DEMO_JD); setJt("Junior Data Analyst"); flash("Demo loaded") }} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"><Sparkles size={15} />Try Demo</button>
+            <button onClick={() => setImp(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-100"><Upload size={15} />Import text</button>
+            <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-100"><Download size={15} />Download PDF</button>
+            <button onClick={() => { setR(EMPTY); setJd(""); setJt(""); flash("Reset") }} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-100"><RotateCcw size={15} />Reset</button>
+          </div>
+        </div>
+        <div className="mx-auto flex max-w-[1400px] gap-1 px-4 pb-2 lg:hidden">
+          {(["edit", "preview", "ats"] as const).map(v => <button key={v} onClick={() => setView(v)} className={`flex-1 rounded-lg py-1.5 text-sm font-semibold ${view === v ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{v === "ats" ? "ATS Score" : v[0].toUpperCase() + v.slice(1)}</button>)}
+        </div>
+      </header>
+
+      {msg && <div role="status" aria-live="polite" className="no-print fixed bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-lg">{msg}</div>}
+      {imp && (
+        <div className="no-print fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="mb-2 font-bold">Import resume text</h3>
+            <p className="mb-2 text-sm text-slate-500">Paste plain text. We fill name, email, phone, summary and skills when detected. Review everything afterwards.</p>
+            <textarea rows={9} className={inp} value={impText} onChange={e => setImpText(e.target.value)} placeholder="Paste your resume text..." />
+            <div className="mt-3 flex justify-end gap-2"><button onClick={() => setImp(false)} className="rounded-xl border px-3 py-2 text-sm font-semibold">Cancel</button><button onClick={importText} className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">Import</button></div>
+          </div>
+        </div>
+      )}
+
+      <div className="mx-auto grid max-w-[1400px] gap-4 p-4 lg:grid-cols-[360px_minmax(0,1fr)_340px]">
+        {/* EDITOR */}
+        <div className={`no-print space-y-3 ${show("edit")}`}>
+          <Card title="Personal info">
+            <div className="grid gap-2">
+              {(["name", "email", "phone", "location", "linkedin"] as const).map(k => <input key={k} aria-label={k} className={inp} placeholder={k[0].toUpperCase() + k.slice(1)} value={r.personal[k]} onChange={e => up(n => { n.personal[k] = e.target.value })} />)}
+            </div>
+          </Card>
+          <Card title={`Summary (${wc(r.summary)} words)`}><textarea rows={4} className={inp} value={r.summary} placeholder="2-3 sentences about your real background" onChange={e => up(n => { n.summary = e.target.value })} /></Card>
+          <Card title="Experience">
+            <div className="space-y-4">
+              {r.experience.map((j, i) => (
+                <div key={j.id} className="space-y-2 rounded-xl bg-slate-50 p-3">
+                  <div className="flex justify-between"><span className="text-xs font-semibold text-slate-500">Role {i + 1}</span><button aria-label="Remove role" onClick={() => up(n => { n.experience.splice(i, 1) })} className="text-slate-400 hover:text-red-600"><Trash2 size={15} /></button></div>
+                  <input className={inp} placeholder="Job title" value={j.title} onChange={e => up(n => { n.experience[i].title = e.target.value })} />
+                  <input className={inp} placeholder="Company" value={j.company} onChange={e => up(n => { n.experience[i].company = e.target.value })} />
+                  <div className="grid grid-cols-2 gap-2"><input className={inp} placeholder="Start (Jun 2025)" value={j.start} onChange={e => up(n => { n.experience[i].start = e.target.value })} /><input className={inp} placeholder="End (Aug 2025)" value={j.end} onChange={e => up(n => { n.experience[i].end = e.target.value })} /></div>
+                  <Bullets items={j.bullets} onChange={v => up(n => { n.experience[i].bullets = v })} />
+                </div>
+              ))}
+              <button onClick={() => up(n => { n.experience.push({ id: uid(), title: "", company: "", start: "", end: "", bullets: [""] }) })} className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600"><Plus size={15} />Add experience</button>
+            </div>
+          </Card>
+          <Card title="Education">
+            <div className="space-y-3">
+              {r.education.map((e, i) => (
+                <div key={e.id} className="space-y-2 rounded-xl bg-slate-50 p-3">
+                  <div className="flex justify-end"><button aria-label="Remove education" onClick={() => up(n => { n.education.splice(i, 1) })} className="text-slate-400 hover:text-red-600"><Trash2 size={15} /></button></div>
+                  <input className={inp} placeholder="School" value={e.school} onChange={x => up(n => { n.education[i].school = x.target.value })} />
+                  <input className={inp} placeholder="Degree" value={e.degree} onChange={x => up(n => { n.education[i].degree = x.target.value })} />
+                  <input className={inp} placeholder="Year" value={e.year} onChange={x => up(n => { n.education[i].year = x.target.value })} />
+                </div>
+              ))}
+              <button onClick={() => up(n => { n.education.push({ id: uid(), school: "", degree: "", year: "" }) })} className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600"><Plus size={15} />Add education</button>
+            </div>
+          </Card>
+          <Card title="Projects">
+            <div className="space-y-4">
+              {r.projects.map((p, i) => (
+                <div key={p.id} className="space-y-2 rounded-xl bg-slate-50 p-3">
+                  <div className="flex justify-end"><button aria-label="Remove project" onClick={() => up(n => { n.projects.splice(i, 1) })} className="text-slate-400 hover:text-red-600"><Trash2 size={15} /></button></div>
+                  <input className={inp} placeholder="Project name" value={p.name} onChange={e => up(n => { n.projects[i].name = e.target.value })} />
+                  <input className={inp} placeholder="One-line description" value={p.description} onChange={e => up(n => { n.projects[i].description = e.target.value })} />
+                  <Bullets items={p.bullets} onChange={v => up(n => { n.projects[i].bullets = v })} />
+                </div>
+              ))}
+              <button onClick={() => up(n => { n.projects.push({ id: uid(), name: "", description: "", bullets: [""] }) })} className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600"><Plus size={15} />Add project</button>
+            </div>
+          </Card>
+          <Card title="Skills (press Enter to add)"><Tags items={r.skills} ph="e.g. Python" onChange={v => up(n => { n.skills = v })} /></Card>
+          <Card title="Certifications"><Tags items={r.certifications} ph="e.g. Google Data Analytics" onChange={v => up(n => { n.certifications = v })} /></Card>
+        </div>
+
+        {/* PREVIEW */}
+        <div className={show("preview")}>
+          <div className="no-print mb-2 flex items-center gap-2"><label htmlFor="tpl" className="text-sm font-semibold">Template</label>
+            <select id="tpl" value={tpl} onChange={e => setTpl(e.target.value as typeof tpl)} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm"><option value="classic">Classic</option><option value="modern">Modern</option><option value="compact">Compact</option></select></div>
+          <article id="resume" className={`mx-auto min-h-[600px] max-w-[820px] rounded-2xl border border-slate-200 bg-white p-8 text-sm shadow-sm ${T}`}>
+            {!toText(r).trim() ? <p className="py-24 text-center text-slate-400">Your resume preview appears here. Start typing, or click Try Demo.</p> : (<>
+              <header className={tpl === "classic" ? "text-center" : ""}>
+                <h1 className={`text-2xl font-extrabold ${tpl === "modern" ? "text-indigo-700" : ""}`}>{r.personal.name || "Your Name"}</h1>
+                <p className="text-slate-600">{[r.personal.email, r.personal.phone, r.personal.location, r.personal.linkedin].filter(Boolean).join(" | ")}</p>
+              </header>
+              {r.summary && <><H>Summary</H><p>{r.summary}</p></>}
+              {r.experience.length > 0 && <><H>Experience</H>{r.experience.map(j => <div key={j.id} className="mb-2"><div className="flex justify-between font-semibold"><span>{[j.title, j.company].filter(Boolean).join(", ")}</span><span className="font-normal text-slate-600">{[j.start, j.end].filter(Boolean).join(" - ")}</span></div><ul className="list-disc pl-5">{j.bullets.filter(Boolean).map((b, i) => <li key={i}>{b}</li>)}</ul></div>)}</>}
+              {r.education.length > 0 && <><H>Education</H>{r.education.map(e => <div key={e.id} className="flex justify-between"><span><b>{e.degree}</b>{e.school ? ", " + e.school : ""}</span><span className="text-slate-600">{e.year}</span></div>)}</>}
+              {r.projects.length > 0 && <><H>Projects</H>{r.projects.map(p => <div key={p.id} className="mb-2"><div className="font-semibold">{p.name}{p.description ? <span className="font-normal"> - {p.description}</span> : null}</div><ul className="list-disc pl-5">{p.bullets.filter(Boolean).map((b, i) => <li key={i}>{b}</li>)}</ul></div>)}</>}
+              {r.skills.length > 0 && <><H>Skills</H><p>{r.skills.join(", ")}</p></>}
+              {r.certifications.length > 0 && <><H>Certifications</H><p>{r.certifications.join(", ")}</p></>}
+            </>)}
+          </article>
+        </div>
+
+        {/* ATS PANEL */}
+        <aside className={`no-print space-y-3 ${show("ats")}`}>
+          <Card title="ATS score">
+            <Ring value={res.score} />
+            <p className={`mt-2 text-center font-bold ${res.score >= 80 ? "text-emerald-600" : res.score >= 60 ? "text-indigo-600" : "text-amber-600"}`} aria-live="polite">{res.verdict}</p>
+            <p className="mt-2 text-center text-xs text-slate-500">Only add skills and achievements that are true. Never invent them to raise the score.</p>
+          </Card>
+          <Card title="Job match">
+            <input className={`${inp} mb-2`} placeholder="Job title (optional)" value={jt} onChange={e => setJt(e.target.value)} />
+            <textarea rows={5} className={inp} placeholder="Paste a job description to check keywords" value={jd} onChange={e => setJd(e.target.value)} />
+            {res.kw ? (<div className="mt-3">
+              <div className="mb-1 flex justify-between text-sm font-semibold"><span>Keyword match</span><span>{res.kw.percent}%</span></div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-indigo-600 transition-all" style={{ width: res.kw.percent + "%" }} /></div>
+              <p className="mt-3 text-xs font-semibold text-slate-500">Matched</p><div className="flex flex-wrap gap-1">{res.kw.matched.map(k => <span key={k} className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">{k}</span>)}</div>
+              <p className="mt-3 text-xs font-semibold text-slate-500">Missing</p><div className="flex flex-wrap gap-1">{res.kw.missing.map(k => <span key={k} className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">{k}</span>)}</div>
+            </div>) : <p className="mt-2 text-xs text-slate-500">Paste a job description to see matched and missing keywords.</p>}
+          </Card>
+          <Card title="Checklist">
+            <ul className="space-y-2">{res.checks.map(c => <li key={c.id} className="flex gap-2 text-sm">{c.passed ? <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={16} /> : <XCircle className="mt-0.5 shrink-0 text-red-500" size={16} />}<span><b className="font-semibold">{c.label}</b>{!c.passed && <span className="block text-xs text-slate-500">{c.fix}</span>}</span></li>)}</ul>
+          </Card>
+          <Card title="Tips">
+            {res.tips.length ? <ul className="space-y-2">{res.tips.map((t, i) => <li key={i} className="text-sm"><span className={`mr-2 rounded-full px-2 py-0.5 text-xs font-semibold ${t.p === "High" ? "bg-red-50 text-red-700" : t.p === "Medium" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{t.p}</span>{t.t}</li>)}</ul> : <p className="text-sm text-emerald-700">Nothing to fix. Great work.</p>}
+          </Card>
+        </aside>
+      </div>
+      <footer className="no-print py-8 text-center text-sm text-slate-500">ResumeForge — Hackathon Prototype</footer>
+    </main>
+  )
+}
